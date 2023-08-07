@@ -1,7 +1,7 @@
 import { arrayIntercalate } from "collection-utils";
 import { ClassProperty, EnumType, ObjectType, Type } from "../Type";
 import { matchType } from "../TypeUtils";
-import { funPrefixNamer, Name, Namer } from "../Naming";
+import { funPrefixNamer, Name, Namer, SimpleName } from "../Naming";
 import { RenderContext } from "../Renderer";
 import { BooleanOption, getOptionValues, Option, OptionValues } from "../RendererOptions";
 import { acronymStyle, AcronymStyleOptions } from "../support/Acronyms";
@@ -17,7 +17,7 @@ import {
 } from "../support/Strings";
 import { TargetLanguage } from "../TargetLanguage";
 import { legalizeName } from "./JavaScript";
-import { Sourcelike } from "../Source";
+import { Sourcelike, SourcelikeArray } from "../Source";
 import { panic } from "../support/Support";
 import { ConvenienceRenderer } from "../ConvenienceRenderer";
 
@@ -172,6 +172,20 @@ export class TypeScriptZodRenderer extends ConvenienceRenderer {
         }
     }
 
+    private searchName(arr: SourcelikeArray, source: Name): SimpleName | null {
+        for (let i = 0; i < arr.length; i++) {
+            const item = arr[i];
+
+            if (item instanceof SimpleName && item !== source) {
+                return item;
+            } else if (Array.isArray(item)) {
+                return this.searchName(item, source);
+            }
+        }
+
+        return null;
+    }
+
     protected emitSchemas(): void {
         this.ensureBlankLine();
 
@@ -180,6 +194,7 @@ export class TypeScriptZodRenderer extends ConvenienceRenderer {
         });
 
         const order: number[] = [];
+        const queue: [number, SimpleName[]][] = [];
         const mapKey: Name[] = [];
         const mapValue: Sourcelike[][] = [];
         this.forEachObject("none", (type: ObjectType, name: Name) => {
@@ -188,30 +203,60 @@ export class TypeScriptZodRenderer extends ConvenienceRenderer {
         });
 
         mapKey.forEach((_, index) => {
-            // assume first
-            let ordinal = 0;
-
             // pull out all names
             const source = mapValue[index];
             const names = source.filter(value => value as Name);
 
+            const deps = [];
+
             // must be behind all these names
-            for (let i = 0; i < names.length; i++) {
+            for (let i = 1; i < names.length; i++) {
                 const depName = names[i];
 
-                // find this name's ordinal, if it has already been added
+                if (Array.isArray(depName)) {
+                    const dep = this.searchName(depName, mapKey[index]);
+
+                    if (dep) deps.push(dep);
+                }
+            }
+
+            // insert index
+            if (deps.length === 0) {
+                order.push(index);
+            } else {
+                queue.push([index, deps]);
+            }
+        });
+
+        while (queue.length > 0) {
+            const name = queue.shift();
+            if (!name) continue;
+
+            const [index, deps] = name;
+            let allDeps = 0;
+            let ordinal = order.length - 1;
+
+            for (let d = 0; d < deps.length; d++) {
+                const dep = deps[d];
+
                 for (let j = 0; j < order.length; j++) {
                     const depIndex = order[j];
-                    if (mapKey[depIndex] === depName) {
+                    const orderDep = mapKey[depIndex];
+
+                    if (orderDep === dep) {
+                        allDeps++;
                         // this is the index of the dependency, so make sure we come after it
                         ordinal = Math.max(ordinal, depIndex + 1);
                     }
                 }
             }
 
-            // insert index
-            order.splice(ordinal, 0, index);
-        });
+            if (allDeps === deps.length) {
+                order.splice(ordinal, 0, index);
+            } else {
+                queue.push(name);
+            }
+        }
 
         // now emit ordered source
         order.forEach(i => this.emitGatheredSource(mapValue[i]));
