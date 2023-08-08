@@ -172,14 +172,14 @@ export class TypeScriptZodRenderer extends ConvenienceRenderer {
         }
     }
 
-    private searchName(arr: SourcelikeArray, source: Name): SimpleName | null {
+    private findName(arr: SourcelikeArray, source: Name): SimpleName | null {
         for (let i = 0; i < arr.length; i++) {
             const item = arr[i];
 
             if (item instanceof SimpleName && item !== source) {
                 return item;
             } else if (Array.isArray(item)) {
-                return this.searchName(item, source);
+                return this.findName(item, source);
             }
         }
 
@@ -206,7 +206,6 @@ export class TypeScriptZodRenderer extends ConvenienceRenderer {
             // pull out all names
             const source = mapValue[index];
             const names = source.filter(value => value as Name);
-
             const deps = [];
 
             // must be behind all these names
@@ -214,7 +213,7 @@ export class TypeScriptZodRenderer extends ConvenienceRenderer {
                 const depName = names[i];
 
                 if (Array.isArray(depName)) {
-                    const dep = this.searchName(depName, mapKey[index]);
+                    const dep = this.findName(depName, mapKey[index]);
 
                     if (dep) deps.push(dep);
                 }
@@ -233,7 +232,7 @@ export class TypeScriptZodRenderer extends ConvenienceRenderer {
             if (!name) continue;
 
             const [index, deps] = name;
-            let allDeps = 0;
+            let depsFound = 0;
             let ordinal = order.length - 1;
 
             for (let d = 0; d < deps.length; d++) {
@@ -241,17 +240,17 @@ export class TypeScriptZodRenderer extends ConvenienceRenderer {
 
                 for (let j = 0; j < order.length; j++) {
                     const depIndex = order[j];
-                    const orderDep = mapKey[depIndex];
+                    const orderedSource = mapKey[depIndex];
 
-                    if (orderDep === dep) {
-                        allDeps++;
+                    if (orderedSource === dep) {
+                        depsFound++;
                         // this is the index of the dependency, so make sure we come after it
                         ordinal = Math.max(ordinal, depIndex + 1);
                     }
                 }
             }
 
-            if (allDeps === deps.length) {
+            if (depsFound === deps.length) {
                 order.splice(ordinal, 0, index);
             } else {
                 queue.push(name);
